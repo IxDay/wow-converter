@@ -1,0 +1,8 @@
+[package]
+name = "converter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wow-m2 = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/graphics/wow-m2"}
+gltf = {path = "/Users/max/Documents/Dev/wow/gltf"}
