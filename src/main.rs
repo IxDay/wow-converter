@@ -1,5 +1,7 @@
 use std::io::Cursor;
+use std::path::PathBuf;
 
+use clap::Parser;
 use wow_m2::M2Model;
 use wow_m2::SkinFile;
 
@@ -7,43 +9,91 @@ use gltf::document::{Document, Node, Scene};
 use gltf::mesh::{Mesh, Mode, Primitive};
 use gltf::material::{Image, Material, MimeType, Texture, TextureInfo};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let base_dir = "../exports/error-cube";
-    let m2_path = format!("{}/error_cube.m2", base_dir);
-    let skin_path = format!("{}/error_cube00.skin", base_dir);
-    let texture_path = format!("{}/frankcube.png", base_dir);
-    let output_path = format!("{}/output.glb", base_dir);
+#[derive(Parser)]
+#[command(about = "Convert M2 models to glTF")]
+struct Cli {
+    /// Path to directory containing M2, skin, and texture files
+    directory: PathBuf,
 
-    // Parse M2 model
+    /// Output path (default: <directory_name>.glb inside the directory)
+    #[arg(short, long)]
+    output: Option<String>,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+    let dir = &cli.directory;
+
+    if !dir.is_dir() {
+        return Err(format!("'{}' is not a directory", dir.display()).into());
+    }
+
+    // 1. Find the M2 file
+    let mut m2_files: Vec<PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("m2")) == Some(true) {
+            m2_files.push(path);
+        }
+    }
+    let m2_path = match m2_files.len() {
+        0 => return Err(format!("no .m2 file found in '{}'", dir.display()).into()),
+        1 => m2_files.remove(0),
+        n => return Err(format!("found {} .m2 files in '{}', expected exactly 1", n, dir.display()).into()),
+    };
+    let m2_stem = m2_path.file_stem().unwrap().to_string_lossy().to_string();
+
+    // 2. Parse the M2
     let m2_data = std::fs::read(&m2_path)?;
     let model = M2Model::parse(&mut Cursor::new(&m2_data))?;
 
-    println!("M2 version: {:?}", model.header.version);
-    println!("Vertices: {}", model.vertices.len());
-    println!("Bones: {}", model.bones.len());
-    println!("Materials: {}", model.materials.len());
-    println!("Textures: {}", model.textures.len());
-
-    // Parse skin file
+    // 3. Find and load the first skin file
+    let skin_path = dir.join(format!("{}00.skin", m2_stem));
+    if !skin_path.exists() {
+        return Err(format!("skin file not found: '{}'", skin_path.display()).into());
+    }
     let skin = SkinFile::load(&skin_path)?;
     let skin_indices = skin.indices();
     let skin_triangles = skin.triangles();
     let submeshes = skin.submeshes();
 
-    println!("Skin indices: {}", skin_indices.len());
-    println!("Skin triangles: {}", skin_triangles.len());
-    println!("Skin submeshes: {}", submeshes.len());
+    // 4. Find texture files
+    let mut texture_paths: Vec<PathBuf> = Vec::new();
+    for tex in &model.textures {
+        let raw_path = tex.filename.string.to_string_lossy();
+        // Extract basename from paths like "SPELLS\FRANKCUBE.BLP"
+        let basename = raw_path.rsplit(&['\\', '/'][..]).next().unwrap_or(&raw_path);
+        // Replace .blp/.BLP extension with .png
+        let png_name = if let Some(stripped) = basename.strip_suffix(".blp").or_else(|| basename.strip_suffix(".BLP")) {
+            format!("{}.png", stripped)
+        } else {
+            basename.to_string()
+        };
+        let tex_path = dir.join(&png_name);
+        if !tex_path.exists() {
+            // Try case-insensitive search
+            let lower = png_name.to_lowercase();
+            let mut found = None;
+            for entry in std::fs::read_dir(dir)? {
+                let path = entry?.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.to_lowercase() == lower {
+                        found = Some(path);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(p) => texture_paths.push(p),
+                None => return Err(format!("texture file not found: '{}'", tex_path.display()).into()),
+            }
+        } else {
+            texture_paths.push(tex_path);
+        }
+    }
 
-    // Debug: print first few raw vertex positions
-    for (i, v) in model.vertices.iter().take(4).enumerate() {
-        println!("Raw V{}: pos=({:.6}, {:.6}, {:.6}) normal=({:.4}, {:.4}, {:.4}) uv=({:.4}, {:.4})",
-            i, v.position.x, v.position.y, v.position.z,
-            v.normal.x, v.normal.y, v.normal.z,
-            v.tex_coords.x, v.tex_coords.y);
-    }
-    if let Some(bone) = model.bones.first() {
-        println!("Bone 0 pivot: ({:.6}, {:.6}, {:.6})", bone.pivot.x, bone.pivot.y, bone.pivot.z);
-    }
+    // 5. Resolve output path
+    let output_path = resolve_output_path(dir, &cli.output);
 
     // Extract vertex data
     let vertex_count = model.vertices.len();
@@ -64,7 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         normals.push(vertex.normal.z);
         normals.push(-vertex.normal.y);
 
-        // UVs: pass raw M2 values through (wow.export double-flips which cancels out)
+        // UVs: pass raw M2 values through
         uvs.push(vertex.tex_coords.x);
         uvs.push(vertex.tex_coords.y);
 
@@ -86,8 +136,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Build triangle indices from skin data
-    // wow.export uses two-level indirection: skin.indices[skin.triangles[start + i]]
-    // We combine all submeshes into a single index list for the error cube
     let mut all_indices: Vec<u16> = Vec::new();
     for submesh in submeshes {
         let tri_start = submesh.triangle_start as usize;
@@ -99,14 +147,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("Total triangle indices: {}", all_indices.len());
-
-    // Load texture
-    let texture_data = std::fs::read(&texture_path)?;
+    // Load first texture
+    let texture_data = std::fs::read(&texture_paths[0])?;
     let image = Image::new(texture_data, MimeType::Png);
     let texture = Texture::new(image);
+    let tex_basename = texture_paths[0].file_stem().unwrap().to_string_lossy();
     let material = Material::builder()
-        .name("frankcube")
+        .name(&*tex_basename)
         .metallic_factor(0.0)
         .base_color_texture(TextureInfo::new(texture))
         .build();
@@ -130,18 +177,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     // Build scene graph
+    let model_name = model.name.as_deref().unwrap_or(&m2_stem);
     let mesh_node = Node::builder()
-        .name("errorcube_Geoset0")
+        .name(&format!("{}_Geoset0", model_name))
         .mesh(mesh)
         .build();
 
     let root_node = Node::builder()
-        .name("errorcube")
+        .name(model_name)
         .child(mesh_node)
         .build();
 
     let scene = Scene::builder()
-        .name("errorcube_Scene")
+        .name(&format!("{}_Scene", model_name))
         .node(root_node)
         .build();
 
@@ -152,8 +200,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Write GLB
     let mut file = std::fs::File::create(&output_path)?;
     document.to_writer(&mut file)?;
-
-    println!("Written GLB to {}", output_path);
+    println!("Wrote {}", output_path.display());
 
     Ok(())
+}
+
+fn resolve_output_path(dir: &PathBuf, output: &Option<String>) -> PathBuf {
+    match output {
+        None => {
+            let dir_name = dir.file_name().unwrap().to_string_lossy();
+            dir.join(format!("{}.glb", dir_name))
+        }
+        Some(out) => {
+            let path = PathBuf::from(out);
+            let path = if path.extension().is_none() {
+                path.with_extension("glb")
+            } else {
+                path
+            };
+            // If it's just a filename (no directory components), place inside the input directory
+            if path.parent() == Some(std::path::Path::new("")) || path.parent().is_none() {
+                dir.join(path)
+            } else {
+                // Has directory components or is absolute — use as-is
+                path
+            }
+        }
+    }
 }
