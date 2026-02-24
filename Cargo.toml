@@ -5,5 +5,8 @@ edition = "2024"
 
 [dependencies]
 wow-m2 = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/graphics/wow-m2"}
+wow-mpq = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/archives/wow-mpq"}
+wow-blp = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/graphics/wow-blp"}
+image = "0.25"
 gltf = {path = "/Users/max/Documents/Dev/wow/gltf"}
 clap = { version = "4", features = ["derive"] }
