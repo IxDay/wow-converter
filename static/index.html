@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Model Viewer</title>
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import { h, render } from 'https://esm.sh/preact@10.19.3';
+    import { useState, useEffect, useMemo, useRef, useCallback } from 'https://esm.sh/preact@10.19.3/hooks';
+    import { default as uFuzzy } from 'https://esm.sh/@leeoniya/ufuzzy@1.0.14';
+
+    function App() {
+      const [entries, setEntries] = useState([]);
+      const [query, setQuery] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [selectedModel, setSelectedModel] = useState(null);
+      const [selectedModelName, setSelectedModelName] = useState(null);
+      const [modelLoading, setModelLoading] = useState(false);
+      const [modelError, setModelError] = useState(null);
+      const scrollRef = useRef(null);
+
+      const uf = useMemo(() => new uFuzzy(), []);
+
+      useEffect(() => {
+        fetch('/models')
+          .then(res => res.text())
+          .then(text => {
+            const lines = text.split('\n').filter(line => line.trim());
+            setEntries(lines);
+            setLoading(false);
+          })
+          .catch(err => {
+            console.error('Failed to load list:', err);
+            // Generate more demo data to test virtual scrolling
+            const demoData = [];
+            for (let i = 0; i < 1000; i++) {
+              demoData.push(`Character/Creature/Model${i}/Model${i}.m2`);
+            }
+            setEntries(demoData);
+            setLoading(false);
+          });
+      }, []);
+
+      const results = useMemo(() => {
+        if (!query.trim() || entries.length === 0) {
+          return entries; // Show ALL entries
+        }
+
+        const idxs = uf.filter(entries, query);
+        if (!idxs || idxs.length === 0) return [];
+
+        const info = uf.info(idxs, entries, query);
+        const order = uf.sort(info, entries, query);
+
+        return order.map(i => entries[info.idx[i]]);
+      }, [query, entries, uf]);
+
+      // Simple virtual scrolling implementation
+      const ITEM_HEIGHT = 45;
+      const [scrollTop, setScrollTop] = useState(0);
+      const [containerHeight, setContainerHeight] = useState(0);
+
+      const handleScroll = useCallback((e) => {
+        setScrollTop(e.target.scrollTop);
+      }, []);
+
+      useEffect(() => {
+        if (scrollRef.current) {
+          setContainerHeight(scrollRef.current.clientHeight);
+        }
+      }, []);
+
+      const startIndex = Math.floor(scrollTop / ITEM_HEIGHT);
+      const endIndex = Math.min(
+        startIndex + Math.ceil(containerHeight / ITEM_HEIGHT) + 1,
+        results.length
+      );
+      const visibleItems = results.slice(startIndex, endIndex);
+      const totalHeight = results.length * ITEM_HEIGHT;
+      const offsetY = startIndex * ITEM_HEIGHT;
+
+      const handleSelectModel = async (entry) => {
+        setModelLoading(true);
+        setModelError(null);
+        setSelectedModelName(entry);
+
+        try {
+          // Fetch the model to trigger generation if needed
+          const response = await fetch('/models/' + entry, { method: 'HEAD' });
+          if (!response.ok) {
+            throw new Error(`Failed to load model: ${response.status} ${response.statusText}`);
+          }
+          setSelectedModel('/models/' + entry);
+        } catch (err) {
+          setModelError(err.message);
+          setModelLoading(false);
+        }
+      };
+
+      const handleModelLoad = () => {
+        setModelLoading(false);
+      };
+
+      const handleModelError = () => {
+        setModelError('Failed to load 3D model');
+        setModelLoading(false);
+      };
+
+      return h('div', { class: 'flex h-screen bg-white dark:bg-slate-950' },
+        // Left column - Search
+        h('div', { class: 'w-full lg:w-1/2 flex flex-col p-6 lg:p-8 overflow-hidden' },
+          h('div', { class: 'mb-6' },
+            h('h1', { class: 'text-2xl font-semibold text-slate-900 dark:text-slate-50 tracking-tight mb-1' }, 'Search Models'),
+            h('p', { class: 'text-sm text-slate-500 dark:text-slate-400' },
+              loading ? 'Loading entries...' :
+              query.trim() ? `${results.length.toLocaleString()} results found` :
+              `${entries.length.toLocaleString()} entries loaded`
+            )
+          ),
+
+          h('div', { class: 'mb-4' },
+            h('input', {
+              type: 'text',
+              placeholder: 'Start typing to search...',
+              value: query,
+              onInput: (e) => setQuery(e.target.value),
+              autoFocus: true,
+              disabled: loading,
+              class: 'w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-800 rounded-md bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-950 dark:focus:ring-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition'
+            })
+          ),
+
+          h('div', {
+            ref: scrollRef,
+            onScroll: handleScroll,
+            class: 'flex-1 border border-slate-200 dark:border-slate-800 rounded-md bg-white dark:bg-slate-900 overflow-y-auto'
+          },
+            query.trim() && results.length === 0
+              ? h('div', { class: 'text-center py-12 text-sm text-slate-500 dark:text-slate-400' }, 'No results found.')
+              : h('div', {
+                  style: {
+                    height: `${totalHeight}px`,
+                    position: 'relative'
+                  }
+                },
+                h('div', {
+                  style: {
+                    transform: `translateY(${offsetY}px)`
+                  }
+                },
+                  visibleItems.map((entry, i) =>
+                    h('div', {
+                      class: 'px-4 py-3 text-sm border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition',
+                      key: startIndex + i,
+                      onClick: () => handleSelectModel(entry),
+                      style: { height: `${ITEM_HEIGHT}px` }
+                    }, entry)
+                  )
+                )
+              )
+          ),
+        ),
+
+        // Right column - Model Viewer
+        h('div', { class: 'hidden lg:flex lg:flex-col w-1/2 bg-slate-50 dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 relative' },
+          // Header with current model name
+          selectedModelName && h('div', {
+            class: 'px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950'
+          },
+            h('h2', { class: 'text-sm font-medium text-slate-900 dark:text-slate-50 truncate' }, selectedModelName)
+          ),
+
+          // Model viewer container
+          h('div', { class: 'flex-1 relative' },
+            // Loading overlay
+            modelLoading && h('div', {
+              class: 'absolute inset-0 bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-10'
+            },
+              h('div', { class: 'flex flex-col items-center gap-3' },
+                // Spinner
+                h('svg', {
+                  class: 'animate-spin h-10 w-10 text-slate-900 dark:text-slate-50',
+                  xmlns: 'http://www.w3.org/2000/svg',
+                  fill: 'none',
+                  viewBox: '0 0 24 24'
+                },
+                  h('circle', {
+                    class: 'opacity-25',
+                    cx: '12',
+                    cy: '12',
+                    r: '10',
+                    stroke: 'currentColor',
+                    'stroke-width': '4'
+                  }),
+                  h('path', {
+                    class: 'opacity-75',
+                    fill: 'currentColor',
+                    d: 'M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z'
+                  })
+                ),
+                h('p', { class: 'text-sm text-slate-600 dark:text-slate-400' }, 'Loading model...')
+              )
+            ),
+
+            // Error message
+            modelError && h('div', {
+              class: 'absolute inset-0 bg-slate-50 dark:bg-slate-900 flex items-center justify-center z-10'
+            },
+              h('div', { class: 'text-center px-6' },
+                h('div', { class: 'mb-3 text-red-500 dark:text-red-400' },
+                  h('svg', {
+                    class: 'h-12 w-12 mx-auto',
+                    xmlns: 'http://www.w3.org/2000/svg',
+                    fill: 'none',
+                    viewBox: '0 0 24 24',
+                    stroke: 'currentColor'
+                  },
+                    h('path', {
+                      'stroke-linecap': 'round',
+                      'stroke-linejoin': 'round',
+                      'stroke-width': '2',
+                      d: 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
+                    })
+                  )
+                ),
+                h('h3', { class: 'text-lg font-semibold text-slate-900 dark:text-slate-50 mb-2' }, 'Failed to load model'),
+                h('p', { class: 'text-sm text-slate-600 dark:text-slate-400 mb-4' }, modelError),
+                h('button', {
+                  class: 'px-4 py-2 text-sm bg-slate-900 dark:bg-slate-50 text-white dark:text-slate-900 rounded-md hover:bg-slate-800 dark:hover:bg-slate-200 transition',
+                  onClick: () => setModelError(null)
+                }, 'Dismiss')
+              )
+            ),
+
+            // Model viewer
+            selectedModel && h('model-viewer', {
+              src: selectedModel,
+              alt: '3D model',
+              'auto-rotate': true,
+              'camera-controls': true,
+              'shadow-intensity': '1',
+              'min-camera-orbit': 'auto auto 0.01m',
+              'max-camera-orbit': 'auto auto 300%',
+              class: 'w-full h-full',
+              onLoad: handleModelLoad,
+              onError: handleModelError
+            }),
+
+            // Placeholder when no model selected
+            !selectedModel && !modelError && h('div', {
+              class: 'absolute inset-0 flex items-center justify-center'
+            },
+              h('p', { class: 'text-slate-400 dark:text-slate-600 text-sm' }, 'Select a model to view')
+            )
+          )
+        )
+      );
+    }
+
+    render(h(App), document.getElementById('app'));
+  </script>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+</body>
+</html>

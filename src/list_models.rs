@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Parser;
-use wow_mpq::Archive;
+use converter::mpq;
 
 #[derive(Parser)]
 #[command(about = "List M2 and WMO files from MPQ archives")]
@@ -20,7 +20,7 @@ struct Cli {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    let mut archives = open_archives(&cli.data)?;
+    let mut archives = mpq::open_archives(&cli.data)?;
 
     let mut seen = HashSet::new();
     let mut names: Vec<String> = Vec::new();
@@ -81,33 +81,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
-}
-
-fn open_archives(path: &PathBuf) -> Result<Vec<Archive>, Box<dyn std::error::Error>> {
-    if path.is_file() {
-        Ok(vec![Archive::open(path)?])
-    } else if path.is_dir() {
-        let mut mpq_paths: Vec<PathBuf> = Vec::new();
-        for entry in std::fs::read_dir(path)? {
-            let p = entry?.path();
-            if p.extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("mpq"))
-                == Some(true)
-            {
-                mpq_paths.push(p);
-            }
-        }
-        mpq_paths.sort();
-        if mpq_paths.is_empty() {
-            return Err(format!("No .mpq files found in '{}'", path.display()).into());
-        }
-        let mut archives = Vec::new();
-        for p in &mpq_paths {
-            archives.push(Archive::open(p)?);
-        }
-        Ok(archives)
-    } else {
-        Err(format!("'{}' is not a file or directory", path.display()).into())
-    }
 }

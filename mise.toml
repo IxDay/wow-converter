@@ -1,6 +1,9 @@
 [tools]
 rust = "1.93"
 
+[tasks."run:server"]
+run = 'cargo run --bin server -- ${DATA_DIR:+--data "$DATA_DIR"}'
+
 [tasks."run:converter"]
 run = 'cargo run --bin converter -- ${DATA_DIR:+--data "$DATA_DIR"}'
 

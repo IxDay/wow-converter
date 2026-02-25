@@ -1,7 +1,4 @@
-mod m2;
-mod mpq;
-mod texture;
-mod wmo;
+use converter::{m2, mpq, wmo};
 
 use std::path::PathBuf;
 

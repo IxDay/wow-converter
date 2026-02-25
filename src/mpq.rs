@@ -2,10 +2,15 @@ use std::path::{Path, PathBuf};
 
 use wow_mpq::Archive;
 
-/// Scan a directory for `.mpq` files and open each as an Archive.
-pub fn open_archives(dir: &Path) -> Result<Vec<Archive>, Box<dyn std::error::Error>> {
+/// Open MPQ archives from a directory (all `.mpq` files) or a single `.mpq` file.
+pub fn open_archives(path: &Path) -> Result<Vec<Archive>, Box<dyn std::error::Error>> {
+    if path.is_file() {
+        println!("Opened 1 MPQ archive");
+        return Ok(vec![Archive::open(path)?]);
+    }
+
     let mut mpq_paths: Vec<PathBuf> = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
+    for entry in std::fs::read_dir(path)? {
         let path = entry?.path();
         if path
             .extension()
@@ -19,7 +24,7 @@ pub fn open_archives(dir: &Path) -> Result<Vec<Archive>, Box<dyn std::error::Err
     mpq_paths.sort();
 
     if mpq_paths.is_empty() {
-        return Err(format!("No .mpq files found in '{}'", dir.display()).into());
+        return Err(format!("No .mpq files found in '{}'", path.display()).into());
     }
 
     let mut archives: Vec<Archive> = Vec::new();
