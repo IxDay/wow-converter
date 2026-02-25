@@ -1,0 +1,8 @@
+[tools]
+rust = "1.93"
+
+[tasks."run:converter"]
+run = 'cargo run --bin converter -- ${DATA_DIR:+--data "$DATA_DIR"}'
+
+[tasks."run:list"]
+run = 'cargo run --bin list-models -- ${DATA_DIR:+--data "$DATA_DIR"}'
