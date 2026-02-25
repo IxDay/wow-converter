@@ -3,6 +3,14 @@ name = "converter"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "converter"
+path = "src/main.rs"
+
+[[bin]]
+name = "list-models"
+path = "src/list_models.rs"
+
 [dependencies]
 wow-m2 = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/graphics/wow-m2"}
 wow-wmo = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/graphics/wow-wmo"}
