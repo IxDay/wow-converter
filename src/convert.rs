@@ -64,10 +64,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => PathBuf::from(format!("{}.glb", stem)),
     };
 
+    drop(archives);
+
+    let parallelism = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    let pool = mpq::ArchivePool::new(mpq_dir, parallelism)?;
+
     if is_wmo {
-        wmo::export_wmo(&mut archives, &archive_path, &output_path)?;
+        wmo::export_wmo(&pool, &archive_path, &output_path)?;
     } else {
-        m2::export_m2(&mut archives, &archive_path, &output_path)?;
+        m2::export_m2(&pool, &archive_path, &output_path)?;
     }
 
     Ok(())

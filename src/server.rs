@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
@@ -8,9 +8,9 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::Router;
 use clap::Parser;
-use wow_mpq::Archive;
 
 use wow_gltf::{m2, mpq, wmo};
+use wow_gltf::mpq::ArchivePool;
 
 #[derive(Parser)]
 #[command(about = "Serve WoW models as glTF over HTTP")]
@@ -29,7 +29,7 @@ struct Cli {
 }
 
 struct AppState {
-    archives: Mutex<Vec<Archive>>,
+    pool: ArchivePool,
     file_index: HashMap<String, String>,
     model_list: String,
     cache_dir: PathBuf,
@@ -43,6 +43,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build file index: lowercase filename -> full archive path
     let all_files = mpq::list_files(&mut archives)?;
+    drop(archives);
+
     let mut file_index: HashMap<String, String> = HashMap::new();
     let mut seen = HashSet::new();
     let mut names: Vec<String> = Vec::new();
@@ -98,8 +100,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     std::fs::create_dir_all(&cli.cache)?;
 
+    let parallelism = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    let pool = ArchivePool::new(&cli.data, parallelism)?;
+
     let state = Arc::new(AppState {
-        archives: Mutex::new(archives),
+        pool,
         file_index,
         model_list,
         cache_dir: cli.cache,
@@ -153,7 +160,7 @@ async fn model_handler(
         .to_string();
     let cache_path = state.cache_dir.join(format!("{}.glb", stem));
 
-    // Check cache first (no lock needed)
+    // Check cache first
     if cache_path.exists() {
         let data = tokio::fs::read(&cache_path)
             .await
@@ -161,26 +168,23 @@ async fn model_handler(
         return Ok(([(header::CONTENT_TYPE, "model/gltf-binary")], data));
     }
 
-    // Convert inside spawn_blocking (library is not Send-safe)
-    let cache_dir = state.cache_dir.clone();
+    // Convert inside spawn_blocking
+    let state_clone = state.clone();
     let cache_path_clone = cache_path.clone();
-    let state_clone = Arc::clone(&state);
 
     let result = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let mut archives = state_clone.archives.lock().map_err(|e| e.to_string())?;
-
         // Double-check cache (another request may have created it)
         if cache_path_clone.exists() {
             return Ok(());
         }
 
         // Write to temp file, then rename for atomicity
-        let temp_path = cache_dir.join(format!(".tmp_{}", stem));
+        let temp_path = state_clone.cache_dir.join(format!(".tmp_{}", stem));
 
         let export_result = if is_m2 {
-            m2::export_m2(&mut archives, &archive_path, &temp_path)
+            m2::export_m2(&state_clone.pool, &archive_path, &temp_path)
         } else {
-            wmo::export_wmo(&mut archives, &archive_path, &temp_path)
+            wmo::export_wmo(&state_clone.pool, &archive_path, &temp_path)
         };
         export_result.map_err(|e| e.to_string())?;
 
