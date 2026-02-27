@@ -1,4 +1,4 @@
-use converter::{m2, mpq, wmo};
+use wow_gltf::{m2, mpq, wmo};
 
 use std::path::PathBuf;
 

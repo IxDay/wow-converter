@@ -10,7 +10,7 @@ use axum::Router;
 use clap::Parser;
 use wow_mpq::Archive;
 
-use converter::{m2, mpq, wmo};
+use wow_gltf::{m2, mpq, wmo};
 
 #[derive(Parser)]
 #[command(about = "Serve WoW models as glTF over HTTP")]
@@ -42,55 +42,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut archives = mpq::open_archives(&cli.data)?;
 
     // Build file index: lowercase filename -> full archive path
+    let all_files = mpq::list_files(&mut archives)?;
     let mut file_index: HashMap<String, String> = HashMap::new();
     let mut seen = HashSet::new();
     let mut names: Vec<String> = Vec::new();
 
-    for archive in &mut archives {
-        let entries = archive.list()?;
-        for entry in &entries {
-            let lower = entry.name.to_ascii_lowercase();
+    for entry in &all_files {
+        let lower = entry.to_ascii_lowercase();
 
-            let is_m2 = lower.ends_with(".m2");
-            let is_wmo = lower.ends_with(".wmo");
-            if !is_m2 && !is_wmo {
-                continue;
-            }
+        let is_m2 = lower.ends_with(".m2");
+        let is_wmo = lower.ends_with(".wmo");
+        if !is_m2 && !is_wmo {
+            continue;
+        }
 
-            // Extract filename only
-            let filename_lower = match lower.rfind(|c| c == '\\' || c == '/') {
-                Some(pos) => &lower[pos + 1..],
-                None => &lower,
-            };
+        // Extract filename only
+        let filename_lower = match lower.rfind(|c| c == '\\' || c == '/') {
+            Some(pos) => &lower[pos + 1..],
+            None => &lower,
+        };
 
-            // Skip WMO group files
-            if is_wmo {
-                let stem = &filename_lower[..filename_lower.len() - 4];
-                if stem.len() >= 4 {
-                    let bytes = stem.as_bytes();
-                    let len = bytes.len();
-                    if bytes[len - 4] == b'_'
-                        && bytes[len - 3].is_ascii_digit()
-                        && bytes[len - 2].is_ascii_digit()
-                        && bytes[len - 1].is_ascii_digit()
-                    {
-                        continue;
-                    }
+        // Skip WMO group files
+        if is_wmo {
+            let stem = &filename_lower[..filename_lower.len() - 4];
+            if stem.len() >= 4 {
+                let bytes = stem.as_bytes();
+                let len = bytes.len();
+                if bytes[len - 4] == b'_'
+                    && bytes[len - 3].is_ascii_digit()
+                    && bytes[len - 2].is_ascii_digit()
+                    && bytes[len - 1].is_ascii_digit()
+                {
+                    continue;
                 }
             }
+        }
 
-            // First occurrence wins for the index
-            file_index
-                .entry(filename_lower.to_string())
-                .or_insert_with(|| entry.name.clone());
+        // First occurrence wins for the index; map filename -> full archive path
+        file_index
+            .entry(filename_lower.to_string())
+            .or_insert_with(|| entry.clone());
 
-            if seen.insert(filename_lower.to_string()) {
-                let original_filename = match entry.name.rfind(|c: char| c == '\\' || c == '/') {
-                    Some(pos) => &entry.name[pos + 1..],
-                    None => &entry.name,
-                };
-                names.push(original_filename.to_string());
-            }
+        if seen.insert(filename_lower.to_string()) {
+            let original_filename = match entry.rfind(|c: char| c == '\\' || c == '/') {
+                Some(pos) => &entry[pos + 1..],
+                None => entry.as_str(),
+            };
+            names.push(original_filename.to_string());
         }
     }
 

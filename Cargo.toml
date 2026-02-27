@@ -1,19 +1,19 @@
 [package]
-name = "converter"
+name = "wow-gltf"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "converter"
+name = "wow_gltf"
 path = "src/lib.rs"
 
 [[bin]]
-name = "converter"
-path = "src/main.rs"
+name = "convert"
+path = "src/convert.rs"
 
 [[bin]]
-name = "list-models"
-path = "src/list_models.rs"
+name = "list"
+path = "src/list.rs"
 
 [[bin]]
 name = "server"

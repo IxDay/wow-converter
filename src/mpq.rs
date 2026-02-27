@@ -94,6 +94,34 @@ pub fn find_file(
     .into())
 }
 
+/// Read the (listfile) from each archive and return all filenames.
+/// Much faster than `archive.list()` which does a hash lookup per file.
+pub fn list_files(archives: &mut [Archive]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut all_names = Vec::new();
+    for archive in archives.iter_mut() {
+        match archive.read_file("(listfile)") {
+            Ok(data) => {
+                let text = String::from_utf8_lossy(&data);
+                for line in text.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+                        continue;
+                    }
+                    let name = match line.find(';') {
+                        Some(pos) => line[..pos].trim(),
+                        None => line,
+                    };
+                    if !name.is_empty() {
+                        all_names.push(name.to_string());
+                    }
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+    Ok(all_names)
+}
+
 /// Returns true if the path looks like a WMO group file (e.g. `foo_000.wmo`).
 fn is_wmo_group_file(path_lower: &str) -> bool {
     let stem = path_lower.strip_suffix(".wmo").unwrap_or(path_lower);
