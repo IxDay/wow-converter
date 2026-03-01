@@ -20,12 +20,21 @@ name = "server"
 path = "src/server.rs"
 
 [dependencies]
-wow-m2 = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/graphics/wow-m2"}
-wow-wmo = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/graphics/wow-wmo"}
-wow-mpq = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/archives/wow-mpq"}
-wow-blp = {path = "/Users/max/Documents/Dev/wow/warcraft-rs/file-formats/graphics/wow-blp"}
+wow-m2 = { git = "https://github.com/IxDay/warcraft-rs", branch = "main" }
+wow-wmo = { git = "https://github.com/IxDay/warcraft-rs", branch = "main" }
+wow-mpq = { git = "https://github.com/IxDay/warcraft-rs", branch = "main" }
+wow-blp = { git = "https://github.com/IxDay/warcraft-rs", branch = "main" }
 image = "0.25"
-gltf = {path = "/Users/max/Documents/Dev/wow/gltf"}
+gltf = { git = "https://github.com/IxDay/gltf", branch = "main" }
 clap = { version = "4", features = ["derive"] }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
+
+# Uncomment for local development:
+# [patch."https://github.com/IxDay/warcraft-rs"]
+# wow-m2 = { path = "../warcraft-rs/file-formats/graphics/wow-m2" }
+# wow-wmo = { path = "../warcraft-rs/file-formats/graphics/wow-wmo" }
+# wow-mpq = { path = "../warcraft-rs/file-formats/archives/wow-mpq" }
+# wow-blp = { path = "../warcraft-rs/file-formats/graphics/wow-blp" }
+# [patch."https://github.com/IxDay/gltf"]
+# gltf = { path = "../gltf" }
