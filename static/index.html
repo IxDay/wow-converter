@@ -19,6 +19,7 @@
       const [selectedModelName, setSelectedModelName] = useState(null);
       const [modelLoading, setModelLoading] = useState(false);
       const [modelError, setModelError] = useState(null);
+      const [activeIndex, setActiveIndex] = useState(0);
       const scrollRef = useRef(null);
 
       const uf = useMemo(() => new uFuzzy(), []);
@@ -57,6 +58,11 @@
         return order.map(i => entries[info.idx[i]]);
       }, [query, entries, uf]);
 
+      // Reset active index when results change
+      useEffect(() => {
+        setActiveIndex(0);
+      }, [results]);
+
       // Simple virtual scrolling implementation
       const ITEM_HEIGHT = 45;
       const [scrollTop, setScrollTop] = useState(0);
@@ -81,13 +87,38 @@
       const totalHeight = results.length * ITEM_HEIGHT;
       const offsetY = startIndex * ITEM_HEIGHT;
 
-      const handleSelectModel = async (entry) => {
+      // Scroll the active item into view
+      useEffect(() => {
+        if (!scrollRef.current || results.length === 0) return;
+        const itemTop = activeIndex * ITEM_HEIGHT;
+        const itemBottom = itemTop + ITEM_HEIGHT;
+        const viewTop = scrollRef.current.scrollTop;
+        const viewBottom = viewTop + scrollRef.current.clientHeight;
+        if (itemTop < viewTop) {
+          scrollRef.current.scrollTop = itemTop;
+        } else if (itemBottom > viewBottom) {
+          scrollRef.current.scrollTop = itemBottom - scrollRef.current.clientHeight;
+        }
+      }, [activeIndex]);
+
+      // Auto-select after 0.5s dwell on the active item
+      useEffect(() => {
+        if (results.length === 0) return;
+        const entry = results[activeIndex];
+        if (!entry) return;
+        const timer = setTimeout(() => handleSelectModel(entry), 500);
+        return () => clearTimeout(timer);
+      }, [activeIndex, results]);
+
+      const selectedRef = useRef(null);
+      const handleSelectModel = useCallback(async (entry) => {
+        if (selectedRef.current === entry) return;
+        selectedRef.current = entry;
         setModelLoading(true);
         setModelError(null);
         setSelectedModelName(entry);
 
         try {
-          // Fetch the model to trigger generation if needed
           const response = await fetch('/models/' + entry, { method: 'HEAD' });
           if (!response.ok) {
             throw new Error(`Failed to load model: ${response.status} ${response.statusText}`);
@@ -97,7 +128,29 @@
           setModelError(err.message);
           setModelLoading(false);
         }
-      };
+      }, []);
+
+      // Use a ref to always have current values in the global keydown handler
+      const stateRef = useRef({ results, activeIndex, handleSelectModel });
+      stateRef.current = { results, activeIndex, handleSelectModel };
+
+      useEffect(() => {
+        const handler = (e) => {
+          const { results, activeIndex, handleSelectModel } = stateRef.current;
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setActiveIndex(i => Math.min(i + 1, results.length - 1));
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setActiveIndex(i => Math.max(i - 1, 0));
+          } else if (e.key === 'Enter' && results.length > 0) {
+            e.preventDefault();
+            handleSelectModel(results[activeIndex]);
+          }
+        };
+        document.addEventListener('keydown', handler);
+        return () => document.removeEventListener('keydown', handler);
+      }, []);
 
       const handleModelLoad = () => {
         setModelLoading(false);
@@ -150,13 +203,16 @@
                     transform: `translateY(${offsetY}px)`
                   }
                 },
-                  visibleItems.map((entry, i) =>
-                    h('div', {
-                      class: 'px-4 py-3 text-sm border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition',
-                      key: startIndex + i,
-                      onClick: () => handleSelectModel(entry),
+                  visibleItems.map((entry, i) => {
+                    const idx = startIndex + i;
+                    const isActive = idx === activeIndex;
+                    return h('div', {
+                      class: `px-4 py-3 text-sm border-b border-slate-200 dark:border-slate-800 cursor-pointer transition ${isActive ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`,
+                      key: idx,
+                      onClick: () => { setActiveIndex(idx); handleSelectModel(entry); },
                       style: { height: `${ITEM_HEIGHT}px` }
-                    }, entry)
+                    }, entry);
+                  }
                   )
                 )
               )
