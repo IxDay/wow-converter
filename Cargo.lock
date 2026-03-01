@@ -2558,7 +2558,7 @@ dependencies = [
 [[package]]
 name = "wow-blp"
 version = "0.6.4"
-source = "git+https://github.com/IxDay/warcraft-rs?branch=main#1401c2abd55a1e4f8a9b3b5979718817aa2f6dd1"
+source = "git+https://github.com/IxDay/warcraft-rs?branch=main#59d6c566b02c6d8cdbd29a176fdf217b53c19e95"
 dependencies = [
  "bytes",
  "color_quant",
@@ -2586,7 +2586,7 @@ dependencies = [
 [[package]]
 name = "wow-m2"
 version = "0.6.4"
-source = "git+https://github.com/IxDay/warcraft-rs?branch=main#1401c2abd55a1e4f8a9b3b5979718817aa2f6dd1"
+source = "git+https://github.com/IxDay/warcraft-rs?branch=main#59d6c566b02c6d8cdbd29a176fdf217b53c19e95"
 dependencies = [
  "anyhow",
  "bitflags",
@@ -2601,7 +2601,7 @@ dependencies = [
 [[package]]
 name = "wow-mpq"
 version = "0.6.4"
-source = "git+https://github.com/IxDay/warcraft-rs?branch=main#1401c2abd55a1e4f8a9b3b5979718817aa2f6dd1"
+source = "git+https://github.com/IxDay/warcraft-rs?branch=main#59d6c566b02c6d8cdbd29a176fdf217b53c19e95"
 dependencies = [
  "adler2",
  "byteorder",
@@ -2630,7 +2630,7 @@ dependencies = [
 [[package]]
 name = "wow-wmo"
 version = "0.6.4"
-source = "git+https://github.com/IxDay/warcraft-rs?branch=main#1401c2abd55a1e4f8a9b3b5979718817aa2f6dd1"
+source = "git+https://github.com/IxDay/warcraft-rs?branch=main#59d6c566b02c6d8cdbd29a176fdf217b53c19e95"
 dependencies = [
  "binrw",
  "bitflags",
