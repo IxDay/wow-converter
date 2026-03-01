@@ -8,7 +8,7 @@ use gltf::document::{Document, Node, Scene};
 use gltf::material::{Image, Material, MimeType, Texture, TextureInfo};
 use gltf::mesh::{Mesh, Mode, Primitive};
 
-use crate::{mpq, texture};
+use crate::texture;
 use crate::mpq::ArchivePool;
 
 pub fn export_wmo(
@@ -17,9 +17,7 @@ pub fn export_wmo(
     output_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Parse root WMO
-    let mut archives = pool.acquire();
-    let data = mpq::read_file(&mut archives, wmo_archive_path)?;
-    pool.release(archives);
+    let data = pool.read_file(wmo_archive_path)?;
 
     let root = match parse_wmo(&mut Cursor::new(&data))? {
         ParsedWmo::Root(r) => r,
@@ -78,11 +76,8 @@ pub fn export_wmo(
             .iter()
             .map(|blp_path| {
                 s.spawn(move || {
-                    let mut archives = pool.acquire();
-                    let blp_data = mpq::read_file(&mut archives, blp_path)
-                        .map_err(|e| format!("{}: {}", blp_path, e));
-                    pool.release(archives);
-                    let blp_data = blp_data?;
+                    let blp_data = pool.read_file(blp_path)
+                        .map_err(|e| format!("{}: {}", blp_path, e))?;
                     let png_buf = texture::blp_to_png(&blp_data)
                         .map_err(|e| format!("{}: {}", blp_path, e))?;
                     let basename = blp_path.rsplit(&['\\', '/'][..]).next().unwrap_or(blp_path);
@@ -103,11 +98,8 @@ pub fn export_wmo(
             .enumerate()
             .map(|(idx, group_path)| {
                 s.spawn(move || {
-                    let mut archives = pool.acquire();
-                    let group_data = mpq::read_file(&mut archives, group_path)
-                        .map_err(|e| format!("{}: {}", group_path, e));
-                    pool.release(archives);
-                    let group_data = group_data?;
+                    let group_data = pool.read_file(group_path)
+                        .map_err(|e| format!("{}: {}", group_path, e))?;
                     let group = match parse_wmo(&mut Cursor::new(&group_data)) {
                         Ok(ParsedWmo::Group(g)) => g,
                         Ok(ParsedWmo::Root(_)) => {

@@ -3,48 +3,106 @@ use std::sync::{Condvar, Mutex};
 
 use wow_mpq::Archive;
 
-/// A pool of pre-opened archive sets for concurrent access.
-pub struct ArchivePool {
-    pool: Mutex<Vec<Vec<Archive>>>,
+/// Per-file pool of opened file descriptors.
+struct FilePool {
+    archives: Mutex<Vec<Archive>>,
     available: Condvar,
 }
 
-impl ArchivePool {
-    /// Create a pool with `size` pre-opened archive sets.
-    pub fn new(data_path: &Path, size: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut pool = Vec::with_capacity(size);
-        for _ in 0..size {
-            pool.push(open_archives_quiet(data_path)?);
-        }
-        println!("Archive pool: {} slots", size);
-        Ok(Self {
-            pool: Mutex::new(pool),
-            available: Condvar::new(),
-        })
-    }
-
-    /// Borrow an archive set from the pool, blocking until one is available.
-    pub fn acquire(&self) -> Vec<Archive> {
-        let mut pool = self.pool.lock().unwrap();
+impl FilePool {
+    fn acquire(&self) -> Archive {
+        let mut pool = self.archives.lock().unwrap();
         loop {
-            if let Some(archives) = pool.pop() {
-                return archives;
+            if let Some(archive) = pool.pop() {
+                return archive;
             }
             pool = self.available.wait(pool).unwrap();
         }
     }
 
-    /// Return an archive set to the pool.
-    pub fn release(&self, archives: Vec<Archive>) {
-        self.pool.lock().unwrap().push(archives);
+    fn release(&self, archive: Archive) {
+        self.archives.lock().unwrap().push(archive);
         self.available.notify_one();
     }
 }
 
-/// Open archives without printing.
-fn open_archives_quiet(path: &Path) -> Result<Vec<Archive>, Box<dyn std::error::Error>> {
+/// A pool of pre-opened MPQ archives for concurrent access.
+/// Each archive file gets its own sub-pool of `depth` file descriptors,
+/// so threads only hold one archive at a time and don't block each other
+/// across different MPQ files.
+pub struct ArchivePool {
+    /// One sub-pool per MPQ file, in priority order (sorted by filename).
+    file_pools: Vec<FilePool>,
+}
+
+impl ArchivePool {
+    /// Create a pool opening each archive `depth` times, all in parallel.
+    pub fn new(data_path: &Path, depth: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        let mpq_paths = collect_mpq_paths(data_path)?;
+        let n_files = mpq_paths.len();
+
+        // Open all (n_files × depth) archives in parallel
+        let all_archives: Vec<(usize, Archive)> = std::thread::scope(|s| {
+            let handles: Vec<_> = mpq_paths
+                .iter()
+                .enumerate()
+                .flat_map(|(file_idx, path)| {
+                    (0..depth).map(move |_| {
+                        s.spawn(move || {
+                            let archive = Archive::open(path).map_err(|e| e.to_string())?;
+                            Ok::<_, String>((file_idx, archive))
+                        })
+                    })
+                })
+                .collect();
+
+            let mut results = Vec::with_capacity(handles.len());
+            for h in handles {
+                results.push(h.join().expect("pool thread panicked")?);
+            }
+            Ok::<_, String>(results)
+        })?;
+
+        // Group by file index into sub-pools
+        let mut pools: Vec<Vec<Archive>> = (0..n_files).map(|_| Vec::with_capacity(depth)).collect();
+        for (file_idx, archive) in all_archives {
+            pools[file_idx].push(archive);
+        }
+
+        let file_pools: Vec<FilePool> = pools
+            .into_iter()
+            .map(|archives| FilePool {
+                archives: Mutex::new(archives),
+                available: Condvar::new(),
+            })
+            .collect();
+
+        println!(
+            "Archive pool: {} files x {} slots",
+            n_files, depth
+        );
+
+        Ok(Self { file_pools })
+    }
+
+    /// Try reading a file from the pooled archives, trying each MPQ in order.
+    pub fn read_file(&self, name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        for file_pool in &self.file_pools {
+            let mut archive = file_pool.acquire();
+            let result = archive.read_file(name);
+            file_pool.release(archive);
+            if let Ok(data) = result {
+                return Ok(data);
+            }
+        }
+        Err(format!("File '{}' not found in any MPQ archive", name).into())
+    }
+}
+
+/// Collect sorted MPQ file paths from a directory or single file.
+fn collect_mpq_paths(path: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     if path.is_file() {
-        return Ok(vec![Archive::open(path)?]);
+        return Ok(vec![path.to_path_buf()]);
     }
 
     let mut mpq_paths: Vec<PathBuf> = Vec::new();
@@ -64,39 +122,12 @@ fn open_archives_quiet(path: &Path) -> Result<Vec<Archive>, Box<dyn std::error::
     if mpq_paths.is_empty() {
         return Err(format!("No .mpq files found in '{}'", path.display()).into());
     }
-
-    let mut archives: Vec<Archive> = Vec::new();
-    for path in &mpq_paths {
-        archives.push(Archive::open(path)?);
-    }
-    Ok(archives)
+    Ok(mpq_paths)
 }
 
 /// Open MPQ archives from a directory (all `.mpq` files) or a single `.mpq` file.
 pub fn open_archives(path: &Path) -> Result<Vec<Archive>, Box<dyn std::error::Error>> {
-    if path.is_file() {
-        println!("Opened 1 MPQ archive");
-        return Ok(vec![Archive::open(path)?]);
-    }
-
-    let mut mpq_paths: Vec<PathBuf> = Vec::new();
-    for entry in std::fs::read_dir(path)? {
-        let path = entry?.path();
-        if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("mpq"))
-            == Some(true)
-        {
-            mpq_paths.push(path);
-        }
-    }
-    mpq_paths.sort();
-
-    if mpq_paths.is_empty() {
-        return Err(format!("No .mpq files found in '{}'", path.display()).into());
-    }
-
+    let mpq_paths = collect_mpq_paths(path)?;
     let mut archives: Vec<Archive> = Vec::new();
     for path in &mpq_paths {
         archives.push(Archive::open(path)?);
