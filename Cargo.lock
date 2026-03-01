@@ -788,7 +788,7 @@ checksum = "556f6b2ea90b8d15a74e0e7bb41671c9bdf38cd9f78c284d750b9ce58a2b5be7"
 [[package]]
 name = "gltf"
 version = "0.1.0"
-source = "git+https://github.com/IxDay/gltf?branch=main#bd392a6d8e2c1a60a98310760ee1c52958c80010"
+source = "git+https://github.com/IxDay/gltf?branch=main#82e80c1948a9a8692a76ec69c65bd1f6cea4240d"
 dependencies = [
  "approx",
  "bincode",
